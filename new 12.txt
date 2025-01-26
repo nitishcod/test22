@@ -1,0 +1,155 @@
+package com.spicemoney.corporatelogin.utility;
+
+import com.amazonaws.AmazonClientException;
+import com.amazonaws.AmazonServiceException;
+import com.amazonaws.HttpMethod;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.regions.Regions;
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.amazonaws.services.s3.model.*;
+import com.spicemoney.corporatelogin.dbconfig.ReadDBProperties;
+import in.spicedigital.mcomm.b2b.propertyFileEncryption.EncryptPropertyFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.util.Date;
+
+@Service
+public class S3Utility {
+
+    private final static Logger logger = LoggerFactory.getLogger(S3Utility.class);
+//    private static final String BUCKET_NAME = "staging-bucket-sm"; // ----------- for staging----
+    private static final String BUCKET_NAME = "aob-doc"; // -----------for production
+    static EncryptPropertyFile encryptPropertyFile = new EncryptPropertyFile();
+    private static final String AWS_ACCESS_KEY_ID = encryptPropertyFile
+            .decryptString(ReadDBProperties.getPropertyValue("ACCESS_KEY"));
+    private static final String AWS_SECRET_ACCESS_KEY = encryptPropertyFile
+            .decryptString(ReadDBProperties.getPropertyValue("SECRET_KEY"));
+    private static AmazonS3 s3 = null;
+
+    private static AmazonS3 initialize(String accessKey, String secretKey) {
+        if (s3 == null) {
+            AWSCredentials awsCredentials = new BasicAWSCredentials(accessKey, secretKey);
+            s3 = AmazonS3ClientBuilder.standard().withCredentials(new AWSStaticCredentialsProvider(awsCredentials))
+                    .withRegion(Regions.AP_SOUTH_1).build();
+            return s3;
+        } else {
+            return s3;
+        }
+    }
+
+    public static boolean upload(InputStream fileStream, long contentLength, String fileName) {
+        initialize(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY);
+        logger.info("Accesskey: {} , secret Key: {}",AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY);
+        try {
+            ObjectMetadata obd = new ObjectMetadata();
+            obd.setContentLength(contentLength);
+            s3.putObject(BUCKET_NAME, "inventory" + "/" + fileName, fileStream, obd);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+
+    }
+
+
+    public static ByteArrayOutputStream downloadFile(String keyName) {
+        initialize(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY);
+
+        try {
+            S3Object s3object = s3.getObject(new GetObjectRequest(BUCKET_NAME, "inventory" + "/" + keyName));
+            if (s3object != null) {
+                logger.info("S3 object response {}", s3object.getKey());
+                InputStream is = s3object.getObjectContent();
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                int len;
+                byte[] buffer = new byte[4096];
+                while ((len = is.read(buffer, 0, buffer.length)) != -1) {
+                    outputStream.write(buffer, 0, len);
+                }
+
+                return outputStream;
+            }
+            return null;
+
+        } catch (IOException ioException) {
+            logger.error("IOException: " + ioException.getMessage());
+        } catch (AmazonServiceException serviceException) {
+            logger.info("AmazonServiceException Message:    " + serviceException.getMessage());
+            throw serviceException;
+        } catch (AmazonClientException clientException) {
+            logger.info("AmazonClientException Message: " + clientException.getMessage());
+            throw clientException;
+        }
+
+        return null;
+    }
+
+    public static String generatePresignedUrl(String key) {
+        initialize(AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY);
+        logger.info("Accesskey: {} , secret Key: {}",AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY);
+        Date expiration = new Date();
+        long expTimeMillis = expiration.getTime();
+        expTimeMillis += 1000 * 60 * 60 * 1;
+        expiration.setTime(expTimeMillis);
+        ResponseHeaderOverrides responseHeaders = new ResponseHeaderOverrides();
+        //responseHeaders.setContentDisposition("attachment; filename =\"conceptsToRevise.pdf\"");
+        responseHeaders.setContentType("image/jpeg");
+        GeneratePresignedUrlRequest generatePresignedUrlRequest = new GeneratePresignedUrlRequest(BUCKET_NAME, key)
+                .withMethod(HttpMethod.GET).withExpiration(expiration).withResponseHeaders(responseHeaders);
+        URL url = s3.generatePresignedUrl(generatePresignedUrlRequest);
+        return url.toString();
+    }
+
+    public static String generatePresignedUrlForVideo(String key) {
+        initialize(AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY);
+        logger.info("Accesskey: {} , secret Key: {}",AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY);
+        Date expiration = new Date();
+        long expTimeMillis = expiration.getTime();
+        expTimeMillis += 1000 * 60 * 60 * 1;
+        expiration.setTime(expTimeMillis);
+        ResponseHeaderOverrides responseHeaders = new ResponseHeaderOverrides();
+        //responseHeaders.setContentDisposition("attachment; filename =\"conceptsToRevise.pdf\"");
+//        responseHeaders.setContentType("image/jpeg");
+        GeneratePresignedUrlRequest generatePresignedUrlRequest = new GeneratePresignedUrlRequest(BUCKET_NAME, key)
+                .withMethod(HttpMethod.GET).withExpiration(expiration);
+        URL url = s3.generatePresignedUrl(generatePresignedUrlRequest);
+        return url.toString();
+    }
+
+    public static String generatePresignedPutUrl(String key) {
+        //initialize(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY);
+        Date expiration = new Date();
+        long expTimeMillis = expiration.getTime();
+        expTimeMillis += 1000 * 60 * 60 * 1;
+        expiration.setTime(expTimeMillis);
+        GeneratePresignedUrlRequest generatePresignedUrlRequest = new GeneratePresignedUrlRequest(BUCKET_NAME, key)
+                .withMethod(HttpMethod.PUT).withExpiration(expiration);
+        URL url = s3.generatePresignedUrl(generatePresignedUrlRequest);
+        return url.toString();
+    }
+
+    public static void main(String[] args) throws FileNotFoundException, InterruptedException {
+        S3Utility utility = new S3Utility();
+        /*
+         * InputStream inputStream = new FileInputStream(new
+         * File("C:/Users/ch-e01696/Pictures/418977.jpg")); utility.upload(inputStream);
+         */
+        Date expiration = new Date();
+        long expTimeMillis = expiration.getTime();
+        expTimeMillis += 1000 * 60 * 60 * 1;
+        expiration.setTime(expTimeMillis);
+
+        // System.out.println(utility.generatePresignedUrl(HttpMethod.GET,
+        // BUCKET_NAME, "test/test8.jpg", expiration));
+    }
+}
